@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:                POE-Component-SSLify-NonBlock
-version:             0.24
-abstract:            Makes using SSL in the world of POE nonblocking and the capability to authenticate client certificates !
+version:             0.25
+abstract:            Nonblocking SSL for POE with client certificate verification.
 license:             ~
 author:              
     - Markus Mueller <pRiVi@cpan.org>

@@ -4,7 +4,7 @@ use strict; use warnings;
 
 # Initialize our version
 use vars qw( $VERSION );
-$VERSION = (qw$LastChangedRevision: 8 $)[1];
+$VERSION = (qw$LastChangedRevision: 9 $)[1];
 
 # Import the SSL death routines
 use Net::SSLeay qw( die_now die_if_ssl_error );
@@ -240,45 +240,33 @@ __END__
 
 =head1 NAME
 
-POE::Component::SSLify::ServerHandle - server object for POE::Component::SSLify
+POE::Component::SSLify::NonBlock::ServerHandle - server object for POE::Component::SSLify::NonBlock
 
 =head1 ABSTRACT
 
-	See POE::Component::SSLify
+	See POE::Component::SSLify::NonBlock
 
 =head1 DESCRIPTION
 
-	This is a subclass of Net::SSLeay::Handle because their read() and sysread()
-	does not cooperate well with POE. They block until length bytes are read from the
-	socket, and that is BAD in the world of POE...
-
-	This subclass behaves exactly the same, except that it doesn't block :)
-
-=head2 DIFFERENCES
-
-	This subclass doesn't know what to do with PRINT/READLINE, as they usually are not used in POE::Wheel operations...
+	This is a tied socket for non-blocking ssl access.
 
 =head1 SEE ALSO
 
-L<POE::Component::SSLify>
+L<POE::Component::SSLify::NonBlock>
 
 =head1 AUTHOR
 
-Apocalypse E<lt>apocal@cpan.orgE<gt>
+pRiVi E<lt>pRiVi@cpan.orgE<gt>
 
 =head1 PROPS
 
-	Original code is entirely Rocco Caputo ( Creator of POE ) -> I simply
-	packaged up the code into something everyone could use...
+This code is based on Apocalypse module POE::Component::SSLify, improved by client certification code and non-blocking sockets.
 
-	From the PoCo::Client::HTTP code for blocking sockets =]
-	# TODO - This code should probably become a POE::Kernel method,
-    	# seeing as it's rather baroque and potentially useful in a number
-    	# of places.
+Copyright 2010 by Markus Mueller/Apocalypse/Rocco Caputo/Dariusz Jackowski.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2008 by Apocalypse/Rocco Caputo
+Copyright 2010 by Markus Mueller
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
