@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.27';
+$VERSION = '0.28';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -164,29 +164,29 @@ Nonblocking SSL for POE with client certificate verification.
 
 This component represents the the common way of using ssl on a server, which
 needs to ensure that not one client can block the whole server. Further it allows
-to authenticate client certificates.
+to verificate client certificates.
 
-=head2 Non-Blocking needed, espacially on client certification authentication
+=head2 Non-Blocking needed, espacially on client certification verification
 
 SSL is a protocol which interacts with the client during the handshake multiple times. If
 the socket is blocking, as on pure POE::Component::SSLify, one client can block the whole
 server.
-Especially if you want to make client certificate authentication, the user has the
+Especially if you want to do client certificate verification, the user has the
 abilty to choose a client certificate. In this situation the ssl handshake is waiting,
 and in blocked mode the whole server also stops responding.
 
-=head2 Client certificate authentication
+=head2 Client certificate verification
 
-You have three opportunities to do client certificate authentication:
+You have three opportunities to do client certificate verification:
 
   Easiest way: 
-    Proof the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or it is unstrusted.
+    Proof the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or if it is unstrusted.
 
   Advanced way:
-    Proof the certificate and poe handler determines if there is no certificate or it is unstrusted.
+    Proof the certificate and poe handler determines if there is no certificate or if it is unstrusted.
 
   Complicated way:
-    Proof the certificate and poe handler determines if there is no certificate, it is unstrusted or it is blocked by a CRL.
+    Proof the certificate and poe handler determines if there is no certificate, if it is unstrusted or if it is blocked by a CRL.
 
 =head3 Easiest way: Client certificat rejection in ssl handshake
 
@@ -399,7 +399,7 @@ Note:
 =head2 SSLify_Options_NonBlock_ClientCert($ctx, $cacrt)
 
 Configures ssl ctx(context) to request from a certificate from
-client which is authenticated against the configured CA in file
+client which is verificated against the configured CA in file
 $cacrt.
 
    SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt');
