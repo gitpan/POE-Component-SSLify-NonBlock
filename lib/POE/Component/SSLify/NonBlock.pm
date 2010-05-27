@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.29';
+$VERSION = '0.30';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -361,7 +361,7 @@ This module is based on POE::Component::SSLify, so we have here the same issues 
 
 =head2 Server_SSLify_NonBlock($ctx, $socket, %$options)
 
-Same as for Server_SSLify from POE::Component::SSLify, but with the CTX of POE::Component::SSLify and a hash for special options:
+Similar to Server_SSLify from POE::Component::SSLify. It needs further the CTX of POE::Component::SSLify and a hash for special options:
 
    my $socket = shift;   # get the socket from somewhere
    $socket = Server_SSLify_NonBlock(SSLify_GetCTX(), $socket, { option1 => 1, option1 => 2,... });
@@ -369,10 +369,11 @@ Same as for Server_SSLify from POE::Component::SSLify, but with the CTX of POE::
 Options are:
 
    clientcertrequest
-      The client is requested for a client certificat ssl handshake
+      The client is requested for a client certificat during
+      ssl handshake
 
    noblockbadclientcert
-      If the client don't provide a client certificate, or the
+      If the client do not provide a client certificate, or the
       client certificate is untrusted, the connection will not
       be aborted. You can check for the errors via the functions
       Server_SSLify_NonBlock_ClientCertificateExists and
@@ -398,15 +399,15 @@ Note:
 
 =head2 SSLify_Options_NonBlock_ClientCert($ctx, $cacrt)
 
-Configures ssl ctx(context) to request from a certificate from
-client which is verificated against the configured CA in file
-$cacrt.
+Configures ssl ctx(context) to request from the client a
+certificate for authentication, which is verificated against
+the configured CA in the file $cacrt.
 
    SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt');
 
 Note:
 
-   SSLify_Options from POE::Component::SSLify must be set first!
+   SSLify_Options from POE::Component::SSLify must be first called !
 
 =head2 Server_SSLify_NonBlock_ClientCertificateExists($socket)
 
@@ -423,8 +424,11 @@ Verify if the client certifcate is trusted by a loaded CA (see SSLify_Options_No
 =head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, $crlfile)
 
 Opens a CRL file, and verify if the serial of the client certificate
-is contained in the CRL file. No file caching is done, each run opens
+is not contained in the CRL file. No file caching is done, each run opens
 the file is new.
+
+Note: If your CRL File is missing, can not be opened or has no blocked
+      certificate at all, every call will get blocked.
 
   Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, 'ca.crl');
   
