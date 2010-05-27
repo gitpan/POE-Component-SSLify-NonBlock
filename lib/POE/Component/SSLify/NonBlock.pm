@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.25';
+$VERSION = '0.26';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -135,7 +135,7 @@ POE::Component::SSLify::NonBlock - Nonblocking SSL for POE with client certifica
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock );
 
-   # Set the key + certificate file
+   # Set the key + certificate file, only one time needed.
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
@@ -144,7 +144,7 @@ POE::Component::SSLify::NonBlock - Nonblocking SSL for POE with client certifica
    # Create a normal SocketFactory wheel or something
    my $factory = POE::Wheel::SocketFactory->new( ... );
 
-   # Converts the socket into a SSL socket POE can communicate with
+   # Converts the socket into a SSL socket POE can communicate with, every time on new socket needed.
    eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, { } ) };
    if ( $@ ) {
       # Unable to SSLify it...
@@ -195,15 +195,19 @@ feature with the "clientcertrequest" paramter. The Server_SSLify_NonBlock functi
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
-   ...
+   
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
    }
+   
    eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
    if ( $@ ) {
       # Unable to load certificate file...
    }
+   
+   ...
+   
    eval { $heap->{socket} = Server_SSLify_NonBlock(SSLify_GetCTX(), $heap->{socket}, {
       clientcertrequest => 1
    } ) };
@@ -220,30 +224,37 @@ is no client certificat or the certificate is not trusted.
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
-   ...
+   
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
    }
+   
    eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
    if ( $@ ) {
       # Unable to load certificate file...
-   }   
-   eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
-      clientcertrequest => 1,
-      noblockbadclientcert => 1
-   } ) };
-   if ( $@ ) {
-      print "SSL Failed: ".$@."\n";
-      delete $heap->{wheel_client};
    }
-   $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
-      Handle     => $heap->{socket},
-      Driver     => POE::Driver::SysRW->new,
-      Filter     => POE::Filter::Stream->new,
-      InputEvent => 'client_input',
+   
+   ...
+
+   client_accept => sub {
       ...
-   }
+      eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+         clientcertrequest => 1,
+         noblockbadclientcert => 1
+      } ) };
+      if ( $@ ) {
+         print "SSL Failed: ".$@."\n";
+         delete $heap->{wheel_client};
+      }
+      $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
+         Handle     => $heap->{socket},
+         Driver     => POE::Driver::SysRW->new,
+         Filter     => POE::Filter::Stream->new,
+         InputEvent => 'client_input',
+         ...
+      }
+   },
    client_input => sub {
       my ( $heap, $kernel, $input ) = @_[ HEAP, KERNEL, ARG0 ];
       return unless Server_SSLify_NonBlock_SSLDone($heap->{socket});
@@ -276,32 +287,38 @@ net-ssleay-patch in the base path of the tar.gz of the packet, and then recompil
 reinstall the Net::SSLeay package.
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
-   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
-   ...
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertProofeAgainstCRL );
+   
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
    }
+   
    eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
    if ( $@ ) {
       # Unable to load certificate file...
-   }   
-   eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
-      clientcertrequest => 1,
-      noblockbadclientcert => 1,
-      getserial => 1
-   } ) };
-   if ( $@ ) {
-      print "SSL Failed: ".$@."\n";
-      delete $heap->{wheel_client};
    }
-   $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
-      Handle     => $heap->{socket},
-      Driver     => POE::Driver::SysRW->new,
-      Filter     => POE::Filter::Stream->new,
-      InputEvent => 'client_input',
+   
+   ...
+
+   client_accept => sub {
       ...
-   }
+      eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+         clientcertrequest => 1,
+         noblockbadclientcert => 1
+      } ) };
+      if ( $@ ) {
+         print "SSL Failed: ".$@."\n";
+         delete $heap->{wheel_client};
+      }
+      $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
+         Handle     => $heap->{socket},
+         Driver     => POE::Driver::SysRW->new,
+         Filter     => POE::Filter::Stream->new,
+         InputEvent => 'client_input',
+         ...
+      }
+   },
    client_input => sub {
       my ( $heap, $kernel, $input ) = @_[ HEAP, KERNEL, ARG0 ];
       return unless Server_SSLify_NonBlock_SSLDone($heap->{socket});
