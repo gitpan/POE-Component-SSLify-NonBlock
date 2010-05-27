@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.26';
+$VERSION = '0.27';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -305,7 +305,8 @@ reinstall the Net::SSLeay package.
       ...
       eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
          clientcertrequest => 1,
-         noblockbadclientcert => 1
+         noblockbadclientcert => 1,
+         getserial => 1
       } ) };
       if ( $@ ) {
          print "SSL Failed: ".$@."\n";
