@@ -6,11 +6,11 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.28';
+$VERSION = '0.29';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
-@EXPORT_OK = qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertProofeAgainstCRL Server_SSLify_NonBlock_SSLDone
+@EXPORT_OK = qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_SSLDone
                   Server_SSLify_NonBlock_GetClientCertificateIDs  Server_SSLify_NonBlock_ClientCertificateExists  Server_SSLify_NonBlock_ClientCertIsValid );
 
 use Symbol qw( gensym );
@@ -82,7 +82,7 @@ sub Server_SSLify_NonBlock_GetClientCertificateIDs {
    return Server_SSLify_NonBlock_ClientCertificateExists($socket) ? @{$infos->[2]} : undef;
 }
 
-sub Server_SSLify_NonBlock_ClientCertProofeAgainstCRL {
+sub Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL {
    my $socket = shift;
    my $crlfilename = shift;
    my $infos = tied( *$socket )->_get_self()->{infos};
@@ -180,13 +180,13 @@ and in blocked mode the whole server also stops responding.
 You have three opportunities to do client certificate verification:
 
   Easiest way: 
-    Proof the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or if it is unstrusted.
+    Verify the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or if it is unstrusted.
 
   Advanced way:
-    Proof the certificate and poe handler determines if there is no certificate or if it is unstrusted.
+    Verify the certificate and poe handler determines if there is no certificate or if it is unstrusted.
 
   Complicated way:
-    Proof the certificate and poe handler determines if there is no certificate, if it is unstrusted or if it is blocked by a CRL.
+    Verify the certificate and poe handler determines if there is no certificate, if it is unstrusted or if it is blocked by a CRL.
 
 =head3 Easiest way: Client certificat rejection in ssl handshake
 
@@ -287,7 +287,7 @@ net-ssleay-patch in the base path of the tar.gz of the packet, and then recompil
 reinstall the Net::SSLeay package.
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
-   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertProofeAgainstCRL );
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL );
    
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
@@ -335,7 +335,7 @@ reinstall the Net::SSLeay package.
                 $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nClientCertInvalid");
          $kernel->yield("disconnect");
          return;
-      } elsif(!(Server_SSLify_NonBlock_ClientCertProofeAgainstCRL($heap->{socket}, 'ca.crl'))) {
+      } elsif(!(Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($heap->{socket}, 'ca.crl'))) {
          exists $heap->{wheel_client} &&
            (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite") &&
                 $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nCRL");
@@ -380,7 +380,7 @@ Options are:
 
    debug
       Get debug messages during ssl handshake. Espacally usefull
-      for Server_SSLify_NonBlock_ClientCertProofeAgainstCRL.
+      for Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL.
 
    getserial
       Request the serial of the client certificate during
@@ -410,23 +410,23 @@ Note:
 
 =head2 Server_SSLify_NonBlock_ClientCertificateExists($socket)
 
-Proofes if the client commited a valid client certificate.
+Verify if the client commited a valid client certificate.
 
   Server_SSLify_NonBlock_ClientCertificateExists($socket);
 
 =head2 Server_SSLify_NonBlock_ClientCertIsValid($socket)
 
-Proofes if the client certifcate is trusted by a loaded CA (see SSLify_Options_NonBlock_ClientCert).
+Verify if the client certifcate is trusted by a loaded CA (see SSLify_Options_NonBlock_ClientCert).
 
   Server_SSLify_NonBlock_ClientCertIsValid($socket);
 
-=head2 Server_SSLify_NonBlock_ClientCertProofeAgainstCRL($socket, $crlfile)
+=head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, $crlfile)
 
-Open a CRL file, and proofes if the serial of the client certificate
-is contained in the CRL file. No file caching is done, each run the
-file is new opened.
+Opens a CRL file, and verify if the serial of the client certificate
+is contained in the CRL file. No file caching is done, each run opens
+the file is new.
 
-  Server_SSLify_NonBlock_ClientCertProofeAgainstCRL($socket, 'ca.crl');
+  Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, 'ca.crl');
   
    WARNING: You have to patch Net::SSLeay to provide the
             Net::SSLeay::verify_serial_against_crl_file function
@@ -445,9 +445,9 @@ Stuffs all of the above functions in @EXPORT_OK so you have to request them dire
 
 =head1 BUGS
 
-=head2 Server_SSLify_NonBlock_ClientCertProofeAgainstCRL: certificate serials
+=head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL: certificate serials
 
-Server_SSLify_NonBlock_ClientCertProofeAgainstCRL also proofes against the serial 
+Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL also verifies against the serial 
 of the CA ! Make sure that you never use the serial of the CA for client certificates!
 
 =head2 Win32
