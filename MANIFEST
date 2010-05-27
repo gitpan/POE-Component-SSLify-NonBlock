@@ -2,6 +2,7 @@ Changes
 MANIFEST
 Makefile.PL
 README
+net-ssleay-patch
 lib/POE/Component/SSLify/NonBlock.pm
 lib/POE/Component/SSLify/NonBlock/ServerHandle.pm
 t/00-load.t

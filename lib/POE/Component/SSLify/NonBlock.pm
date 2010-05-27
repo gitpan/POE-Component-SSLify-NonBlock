@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.23';
+$VERSION = '0.24';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -159,7 +159,7 @@ POE::Component::SSLify::NonBlock - Makes using SSL in the world of POE nonblocki
 
 =head1 ABSTRACT
 
-Makes SSL use in POE in non-blocking mode and the capability to authenticate client certificates !
+Makes SSL use in POE for non-blocking mode and the capability to authenticate client certificates !
 
 =head1 DESCRIPTION
 
@@ -194,6 +194,17 @@ You have three opportunities to do client certificate authentication:
 Generaly you can use the "Server-side usage" example above, but you have to enable the client certification
 feature with the "clientcertrequest" paramter. The Server_SSLify_NonBlock function allows a hash for parameters:
 
+	use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
+	use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
+   ...
+   eval { SSLify_Options( 'server.key', 'server.crt' ) };
+   if ( $@ ) {
+      # Unable to load key or certificate file...
+   }
+   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
+   if ( $@ ) {
+      # Unable to load certificate file...
+   }
    eval { $heap->{socket} = Server_SSLify_NonBlock(SSLify_GetCTX(), $heap->{socket}, {
       clientcertrequest => 1
    } ) };
@@ -208,6 +219,9 @@ is no client certificat or the certificate is not trusted.
 
 =head3 Advanced way: Client certificat reject in POE Handler
 
+	use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
+	use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
+   ...
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
@@ -261,6 +275,9 @@ is no client certificat or the certificate is not trusted.
 WARNING: For this to work you have to patch into Net::SSLeay the lines in the file
 net-ssleay-patch, and then recompile and reinstall the Net::SSLeay package.
 
+	use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
+	use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
+   ...
    eval { SSLify_Options( 'server.key', 'server.crt' ) };
    if ( $@ ) {
       # Unable to load key or certificate file...
