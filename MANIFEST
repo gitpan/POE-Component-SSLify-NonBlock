@@ -3,6 +3,7 @@ MANIFEST
 Makefile.PL
 README
 lib/POE/Component/SSLify/NonBlock.pm
+lib/POE/Component/SSLify/NonBlock/ServerHandle.pm
 t/00-load.t
 t/pod-coverage.t
 t/pod.t
