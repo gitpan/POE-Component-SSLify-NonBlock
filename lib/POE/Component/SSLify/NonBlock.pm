@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.34';
+$VERSION = '0.35';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -163,13 +163,13 @@ Nonblocking SSL for POE with client certificate verification.
 =head1 DESCRIPTION
 
 This component represents a common way of using ssl on a server, which
-needs to ensure that not one client can block the whole server. Further
+needs to ensure that no client can block the whole server. Further
 it allows to verificate client certificates.
 
-=head2 Non-Blocking needed, espacielly on client certification verification
+=head2 Non-Blocking needed, especially on client certificate verification
 
 SSL is a protocol which interacts with the client during the handshake multiple times. If
-the socket is blocking, as on pure POE::Component::SSLify, one client can block the whole
+the socket is blocking, as on pure POE::Component::SSLify, a client can block the whole
 server.
 Especially if you want to do client certificate verification, the user has the
 abilty to choose a client certificate. In this situation the ssl handshake is waiting,
@@ -180,49 +180,18 @@ and in blocked mode the whole server also stops responding.
 You have three opportunities to do client certificate verification:
 
   Easiest way: 
-    Verify the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or if it is unstrusted.
+    Verify the certificate and let OpenSSL reject the connection during ssl handshake if there is no certificate or it is unstrusted.
 
   Advanced way:
-    Verify the certificate and poe handler determines if there is no certificate or if it is unstrusted.
+    Verify the certificate and poe handler determines if there is no certificate or it is unstrusted.
 
   Complicated way:
-    Verify the certificate and poe handler determines if there is no certificate, if it is unstrusted or if it is blocked by a CRL.
+    Verify the certificate and poe handler determines if there is no certificate, it is unstrusted or if it is blocked by a CRL.
 
 =head3 Easiest way: Client certificat rejection in ssl handshake
 
-Generaly you can use the "Server-side usage" example above, but you have to enable the client certification
-feature with the "clientcertrequest" paramter. The Server_SSLify_NonBlock function allows a hash for parameters:
-
-   use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
-   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert );
-   
-   eval { SSLify_Options( 'server.key', 'server.crt' ) };
-   if ( $@ ) {
-      # Unable to load key or certificate file...
-   }
-   
-   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
-   if ( $@ ) {
-      # Unable to load certificate file...
-   }
-   
-   ...
-   
-   eval { $heap->{socket} = Server_SSLify_NonBlock(SSLify_GetCTX(), $heap->{socket}, {
-      clientcertrequest => 1
-   } ) };
-   if ( $@ ) {
-      print "SSL Failed: ".$@."\n";
-      delete $heap->{wheel_client};
-   }
-
-Now the server sends during SSL handshake the request for a client certificate. By default,
-POE::Component::SSLify::NonBlock aborts the connection if "clientcertrequest" is set and there
-is no client certificat or the certificate is not trusted.
-
-=head3 Advanced way: Client certificat reject in POE Handler
-
-Here an solution with SSL direct after ACCEPT.
+Generally you can use the "Server-side usage" example above, but you have to enable the client certification
+feature with the "clientcertrequest" parameter. The Server_SSLify_NonBlock function allows a hash for parameters:
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone );
@@ -250,7 +219,6 @@ Here an solution with SSL direct after ACCEPT.
             my ( $heap, $kernel, $socket ) = @_[ HEAP, KERNEL, ARG0 ];
             eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
                clientcertrequest => 1,
-               getserial => 1,
                debug => 1
             } ) };
             if ( $@ ) {
@@ -285,14 +253,88 @@ Here an solution with SSL direct after ACCEPT.
     
    $poe_kernel->run();
 
-=head3 Complicated way: Client certificat reject in POE Handler with CRL support
+Now the server sends the request for a client certificate during SSL handshake. By default,
+POE::Component::SSLify::NonBlock aborts the connection if "clientcertrequest" is set and there
+is no client certificat or the certificate is not trusted.
 
-WARNING: For this to work you have to patch into Net::SSLeay the lines in the file
-net-ssleay-patch in the base path of the tar.gz of the packet, and then recompile and
-reinstall the Net::SSLeay package.
+=head3 Advanced way: Client certificat reject in POE Handler
 
-Here an solution with SSL/TLS on the fly, initiated via "STARTTLS". For example if
-you want to do upgrade a plaintext protokoll to SSL/TLS (e.g. IMAPS, POPS or FTPS).
+   use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone );
+   use POE qw( Wheel::SocketFactory Driver::SysRW Filter::Stream Wheel::ReadWrite );
+
+   eval { SSLify_Options( 'server.key', 'server.crt' ) };
+   die "SSLify_Options: ".$@ if ( $@ );
+
+   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt') };
+   die "SSLify_Options_NonBlock_ClientCert: ".$@ if ( $@ );
+
+   POE::Session->create(
+      inline_states => {
+         _start => sub {
+            my ( $heap, $kernel ) = @_[ HEAP, KERNEL ];
+            $heap->{server_wheel} = POE::Wheel::SocketFactory->new(
+               BindAddress  => "0.0.0.0",
+               BindPort     => 443,
+               Reuse        => 'yes',
+               SuccessEvent => 'client_accept',
+               FailureEvent => 'accept_failure',
+            );
+         },
+         client_accept => sub {
+            my ( $heap, $kernel, $socket ) = @_[ HEAP, KERNEL, ARG0 ];
+            eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+               clientcertrequest => 1,
+               noblockbadclientcert => 1,
+               debug => 1
+            } ) };
+            if ( $@ ) {
+               print "SSL Failed: ".$@."\n";
+               delete $heap->{server}->{$wheel_id}->{wheel};
+            }
+            my $io_wheel = POE::Wheel::ReadWrite->new(
+               Handle     => $socket,
+               Driver     => POE::Driver::SysRW->new,
+               Filter     => POE::Filter::Stream->new,
+               InputEvent => 'client_input'
+            );
+            $heap->{server}->{$io_wheel->ID()}->{wheel} = $io_wheel;
+            $heap->{server}->{$io_wheel->ID()}->{socket} = $socket;
+         },
+         client_input => sub {
+            my ( $heap, $kernel, $input, $wheel_id ) = @_[ HEAP, KERNEL, ARG0, ARG1 ];
+            my $canwrite = exists $heap->{server}->{$wheel_id}->{wheel} &&
+                             (ref($heap->{server}->{$wheel_id}->{wheel}) eq "POE::Wheel::ReadWrite");
+            my $socket = $heap->{server}->{$wheel_id}->{socket};
+            return unless Server_SSLify_NonBlock_SSLDone($socket);
+            if (!(Server_SSLify_NonBlock_ClientCertificateExists($socket))) {
+               $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] NoClientCertExists\n") if $canwrite;
+               return $kernel->yield("disconnect" => $wheel_id);
+            } elsif(!(Server_SSLify_NonBlock_ClientCertIsValid($socket))) {
+              $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] ClientCertInvalid\n") if $canwrite;
+               return $kernel->yield("disconnect" => $wheel_id);
+            }
+            $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] Yeah! You're authenticated!\n") if $canwrite;
+            $kernel->yield("disconnect" => $wheel_id);
+         },
+         disconnect => sub {
+            my ($heap, $kernel, $wheel_id) = @_[HEAP, KERNEL, ARG0];
+            $kernel->delay(close_delayed => 1, $wheel_id)
+               unless ($heap->{server}->{$wheel_id}->{disconnecting}++);
+         },
+         close_delayed => sub {
+            my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
+            delete $heap->{server}->{$wheel_id}->{wheel};
+         }
+      }
+   );
+    
+   $poe_kernel->run();
+
+=head3 Complicated way: Client certificate reject in POE Handler with CRL support
+
+WARNING: To use this you have to patch the lines from net-ssleay-patch fike into Net::SSLeay
+(you find the patch in the base path of the tar.gz packet). Then recompile and reinstall the Net::SSLeay package.
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone );
@@ -382,7 +424,7 @@ the configured CA in the file $cacrt.
 
 Note:
 
-   SSLify_Options from POE::Component::SSLify must be first called !
+   SSLify_Options from POE::Component::SSLify must be called first!
 
 =head2 Server_SSLify_NonBlock($ctx, $socket, %$options)
 
@@ -394,18 +436,18 @@ Similar to Server_SSLify from POE::Component::SSLify. It needs further the CTX o
 Options are:
 
    clientcertrequest
-      The client is requested for a client certificat during
+      The client gets requested for a client certificat during 
       ssl handshake
 
    noblockbadclientcert
-      If the client do not provide a client certificate, or the
+      If the client does not provide a client certificate or the
       client certificate is untrusted, the connection will not
       be aborted. You can check for the errors via the functions
       Server_SSLify_NonBlock_ClientCertificateExists and
       Server_SSLify_NonBlock_ClientCertIsValid.
 
    debug
-      Get debug messages during ssl handshake. Espacally usefull
+      Get debug messages during ssl handshake. Especially usefull
       for Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL.
 
    getserial
@@ -436,17 +478,17 @@ Verify if the client commited a valid client certificate.
 
 =head2 Server_SSLify_NonBlock_ClientCertIsValid($socket)
 
-Verify if the client certifcate is trusted by a loaded CA (see SSLify_Options_NonBlock_ClientCert).
+Verify if the client certificate is trusted by a loaded CA (see SSLify_Options_NonBlock_ClientCert).
 
   Server_SSLify_NonBlock_ClientCertIsValid($socket);
 
 =head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, $crlfile)
 
 Opens a CRL file, and verify if the serial of the client certificate
-is not contained in the CRL file. No file caching is done, each run opens
-the file new.
+is not contained in the CRL file. No file caching is done, each call opens
+the file again.
 
-Note: If your CRL File is missing, can not be opened or has no blocked
+Note: If your CRL file is missing, can not be opened is empty, or has no blocked
       certificate at all, every call will get blocked.
 
   Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, 'ca.crl');
@@ -462,7 +504,7 @@ Note: If your CRL File is missing, can not be opened or has no blocked
 Fetches the IDs as array of the clients certifcate and its
 signees.
 
-Retruns empty ist if you did not patch Net::SSLeay.
+Retruns empty list if you did not patch Net::SSLeay.
 
 =head2 hexdump($string)
 
@@ -481,18 +523,18 @@ You can use all functions from POE::Component::SSLify !
 
 =head2 Based on POE::Component::SSLify
 
-This module is based on POE::Component::SSLify, so we have in POE::Component::SSLify::NonBlock the same issues as on POE::Component::SSLify.
+This module is based on POE::Component::SSLify, so POE::Component::SSLify::NonBlock has the same issues.
 
 =head1 EXPORT
 
-Stuffs all of the above functions in @EXPORT_OK so you have to request them directly
+Puts all of the above functions in @EXPORT_OK so you have to request them directly
 
 =head1 BUGS
 
 =head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL: certificate serials
 
 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL also verifies against the serial 
-of the CA ! Make sure that you never use the serial of the CA for client certificates!
+of the CA! Make sure that you never use the serial of the CA for client certificates!
 
 =head2 Win32
 
