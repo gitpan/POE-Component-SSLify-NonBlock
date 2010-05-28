@@ -26,7 +26,7 @@ sub TIEHANDLE {
       my $orfilter = &Net::SSLeay::VERIFY_PEER
                      | &Net::SSLeay::VERIFY_CLIENT_ONCE;
       $orfilter |=  &Net::SSLeay::VERIFY_FAIL_IF_NO_PEER_CERT unless $params->{noblockbadclientcert};
-      Net::SSLeay::set_verify ($ssl, $orfilter, \&verify);
+      Net::SSLeay::set_verify ($ssl, $orfilter, \&VERIFY);
    }
    $getserial = $params->{getserial};
 
@@ -43,11 +43,12 @@ sub TIEHANDLE {
 	}, $class;
    $globalinfos = [0, 0, []];
 
-   return undef unless $self->HandleSSL();
+   return undef unless $self->HANDLESSL();
 	return $self;
 }
 
-sub verify {
+# Verifys client certificates
+sub VERIFY {
    my ($ok, $x509_store_ctx) = @_;
    #print "VERIFY!\n";
    $globalinfos->[0] = $ok ? 1 : 2 if ($globalinfos->[0] != 2);
@@ -60,7 +61,8 @@ sub verify {
    return 1; # $ok; # 1=accept cert, 0=reject
 }
 
-sub HandleSSL {
+# Process input for OpenSSL
+sub HANDLESSL {
    my $self = shift;
    my $rv = Net::SSLeay::accept($self->{ssl});
    $self->{acceptstate} = 0;
@@ -93,7 +95,7 @@ sub READ {
    return -1 unless exists($self->{'acceptstate'});
 
    if ($self->{'acceptstate'} < 3) {
-      $self->{'acceptstate'} = $self->HandleSSL();
+      $self->{'acceptstate'} = $self->HANDLESSL();
       if ($self->{'acceptstate'} < 3) {
          return -1 unless $self->{'acceptstate'};
          # Currently we can't read cause we're in handshake!
@@ -149,7 +151,7 @@ sub WRITE {
    return -1 unless exists($self->{'acceptstate'});
 
    if ($self->{'acceptstate'} < 3) {
-      $self->{'acceptstate'} = $self->HandleSSL();
+      $self->{'acceptstate'} = $self->HANDLESSL();
       if ($self->{'acceptstate'} < 3) {
          return -1 unless $self->{'acceptstate'};
          # Currently we can't read cause we're in handshake!
@@ -249,6 +251,18 @@ POE::Component::SSLify::NonBlock::ServerHandle - server object for POE::Componen
 =head1 DESCRIPTION
 
 	This is a tied socket for non-blocking ssl access.
+
+=head1 FUNCTIONS
+
+=head2 HANDLESSL
+
+Processes input for OpenSSL.
+
+
+=head2 VERIFY
+
+Verifys client certificates.
+
 
 =head1 SEE ALSO
 

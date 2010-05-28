@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.33';
+$VERSION = '0.34';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -225,61 +225,65 @@ is no client certificat or the certificate is not trusted.
 Here an solution with SSL direct after ACCEPT.
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
-   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_SSLDone );
-   
-   eval { SSLify_Options( 'server.key', 'server.crt' ) };
-   if ( $@ ) {
-      # Unable to load key or certificate file...
-   }
-   
-   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
-   if ( $@ ) {
-      # Unable to load certificate file...
-   }
-   
-   ...
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone );
+   use POE qw( Wheel::SocketFactory Driver::SysRW Filter::Stream Wheel::ReadWrite );
 
-   client_accept => sub {
-      ...
-      eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
-         clientcertrequest => 1,
-         noblockbadclientcert => 1
-      } ) };
-      if ( $@ ) {
-         print "SSL Failed: ".$@."\n";
-         delete $heap->{wheel_client};
+   eval { SSLify_Options( 'server.key', 'server.crt' ) };
+   die "SSLify_Options: ".$@ if ( $@ );
+
+   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt') };
+   die "SSLify_Options_NonBlock_ClientCert: ".$@ if ( $@ );
+
+   POE::Session->create(
+      inline_states => {
+         _start => sub {
+            my ( $heap, $kernel ) = @_[ HEAP, KERNEL ];
+            $heap->{server_wheel} = POE::Wheel::SocketFactory->new(
+               BindAddress  => "0.0.0.0",
+               BindPort     => 443,
+               Reuse        => 'yes',
+               SuccessEvent => 'client_accept',
+               FailureEvent => 'accept_failure',
+            );
+         },
+         client_accept => sub {
+            my ( $heap, $kernel, $socket ) = @_[ HEAP, KERNEL, ARG0 ];
+            eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+               clientcertrequest => 1,
+               getserial => 1,
+               debug => 1
+            } ) };
+            if ( $@ ) {
+               print "SSL Failed: ".$@."\n";
+               delete $heap->{server}->{$wheel_id}->{wheel};
+            }
+            my $io_wheel = POE::Wheel::ReadWrite->new(
+               Handle     => $socket,
+               Driver     => POE::Driver::SysRW->new,
+               Filter     => POE::Filter::Stream->new,
+               InputEvent => 'client_input'
+            );
+            $heap->{server}->{$io_wheel->ID()}->{wheel} = $io_wheel;
+            $heap->{server}->{$io_wheel->ID()}->{socket} = $socket;
+         },
+         client_input => sub {
+            my ( $heap, $kernel, $input, $wheel_id ) = @_[ HEAP, KERNEL, ARG0, ARG1 ];
+            $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] Yeah! You're authenticated!\n") if $canwrite;
+            $kernel->yield("disconnect" => $wheel_id);
+         },
+         disconnect => sub {
+            my ($heap, $kernel, $wheel_id) = @_[HEAP, KERNEL, ARG0];
+            $kernel->delay(close_delayed => 1, $wheel_id)
+               unless ($heap->{server}->{$wheel_id}->{disconnecting}++);
+         },
+         close_delayed => sub {
+            my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
+            delete $heap->{server}->{$wheel_id}->{wheel};
+         }
       }
-      $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
-         Handle     => $heap->{socket},
-         Driver     => POE::Driver::SysRW->new,
-         Filter     => POE::Filter::Stream->new,
-         InputEvent => 'client_input',
-         ...
-      }
-   },
-   client_input => sub {
-      my ( $heap, $kernel, $input ) = @_[ HEAP, KERNEL, ARG0 ];
-      my $canwrite = exists $heap->{wheel_client} &&
-                       (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite");
-      return unless Server_SSLify_NonBlock_SSLDone($heap->{socket});
-      if (!(Server_SSLify_NonBlock_ClientCertificateExists($heap->{socket}))) {
-         $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nNoClientCertExists") if $canwrite;
-         $kernel->yield("disconnect");
-         return;
-      } elsif(!(Server_SSLify_NonBlock_ClientCertIsValid($heap->{socket}))) {
-         $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nClientCertInvalid") if $canwrite;
-         $kernel->yield("disconnect");
-         return;
-      }
-      $heap->{wheel_client}->put("Yeah! You're authenticated!") if $canwrite;
-      $kernel->yield("disconnect");
-   },
-   disconnect => sub { $_[KERNEL]->delay(close_delayed => 1) unless ($_[HEAP]->{disconnecting}++); },
-   close_delayed => sub {
-      my ($kernel, $heap) = @_[KERNEL, HEAP];
-      delete $heap->{wheel_client};
-   },
-   ...
+   );
+    
+   $poe_kernel->run();
 
 =head3 Complicated way: Client certificat reject in POE Handler with CRL support
 
@@ -291,79 +295,80 @@ Here an solution with SSL/TLS on the fly, initiated via "STARTTLS". For example 
 you want to do upgrade a plaintext protokoll to SSL/TLS (e.g. IMAPS, POPS or FTPS).
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
-   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_SSLDone );
-   
-   eval { SSLify_Options( 'server.key', 'server.crt' ) };
-   if ( $@ ) {
-      # Unable to load key or certificate file...
-   }
-   
-   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt')) };
-   if ( $@ ) {
-      # Unable to load certificate file...
-   }
-   
-   ...
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone );
+   use POE qw( Wheel::SocketFactory Driver::SysRW Filter::Stream Wheel::ReadWrite );
 
-   client_accept => sub {
-      ...
-      $heap->{wheel_client} = POE::Wheel::ReadWrite->new(
-         Handle     => $heap->{socket},
-         Driver     => POE::Driver::SysRW->new,
-         Filter     => POE::Filter::Stream->new,
-         InputEvent => 'client_input',
-         ...
-      }
-      $heap->{mode} = 'plain';
-   },
-   client_input => sub {
-      my ( $heap, $kernel, $input ) = @_[ HEAP, KERNEL, ARG0 ];
-      my $canwrite = exists $heap->{wheel_client} &&
-                       (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite");
-      if ($heap->{mode} eq "plain") {
-         if ($input ~= /STARTTLS/) {
-            $heap->{wheel_client}->put("Do now SSL Handshake.\n") if $canwrite;
-            eval { $heap->{socket} = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+   eval { SSLify_Options( 'server.key', 'server.crt' ) };
+   die "SSLify_Options: ".$@ if ( $@ );
+
+   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt') };
+   die "SSLify_Options_NonBlock_ClientCert: ".$@ if ( $@ );
+
+   POE::Session->create(
+      inline_states => {
+         _start => sub {
+            my ( $heap, $kernel ) = @_[ HEAP, KERNEL ];
+            $heap->{server_wheel} = POE::Wheel::SocketFactory->new(
+               BindAddress  => "0.0.0.0",
+               BindPort     => 443,
+               Reuse        => 'yes',
+               SuccessEvent => 'client_accept',
+               FailureEvent => 'accept_failure',
+            );
+         },
+         client_accept => sub {
+            my ( $heap, $kernel, $socket ) = @_[ HEAP, KERNEL, ARG0 ];
+            eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
                clientcertrequest => 1,
                noblockbadclientcert => 1,
-               getserial => 1
+               getserial => 1,
+               debug => 1
             } ) };
             if ( $@ ) {
                print "SSL Failed: ".$@."\n";
-               delete $heap->{wheel_client};
+               delete $heap->{server}->{$wheel_id}->{wheel};
             }
-            $heap->{mode} = 'sslhandshake';
-         } else {
-            $heap->{wheel_client}->put("First start TLS SSL with the 'STARTTLS' command.\n") if $canwrite;
+            my $io_wheel = POE::Wheel::ReadWrite->new(
+               Handle     => $socket,
+               Driver     => POE::Driver::SysRW->new,
+               Filter     => POE::Filter::Stream->new,
+               InputEvent => 'client_input'
+            );
+            $heap->{server}->{$io_wheel->ID()}->{wheel} = $io_wheel;
+            $heap->{server}->{$io_wheel->ID()}->{socket} = $socket;
+         },
+         client_input => sub {
+            my ( $heap, $kernel, $input, $wheel_id ) = @_[ HEAP, KERNEL, ARG0, ARG1 ];
+            my $canwrite = exists $heap->{server}->{$wheel_id}->{wheel} &&
+                             (ref($heap->{server}->{$wheel_id}->{wheel}) eq "POE::Wheel::ReadWrite");
+            my $socket = $heap->{server}->{$wheel_id}->{socket};
+            return unless Server_SSLify_NonBlock_SSLDone($socket);
+            if (!(Server_SSLify_NonBlock_ClientCertificateExists($socket))) {
+               $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] NoClientCertExists\n") if $canwrite;
+               return $kernel->yield("disconnect" => $wheel_id);
+            } elsif(!(Server_SSLify_NonBlock_ClientCertIsValid($socket))) {
+              $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] ClientCertInvalid\n") if $canwrite;
+               return $kernel->yield("disconnect" => $wheel_id);
+            } elsif(!(Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, 'ca.crl'))) {
+               $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] CRL\n") if $canwrite;
+               return $kernel->yield("disconnect" => $wheel_id);
+            }
+            $heap->{server}->{$wheel_id}->{wheel}->put("[".$wheel_id."] Yeah! You're authenticated!\n") if $canwrite;
+            $kernel->yield("disconnect" => $wheel_id);
+         },
+         disconnect => sub {
+            my ($heap, $kernel, $wheel_id) = @_[HEAP, KERNEL, ARG0];
+            $kernel->delay(close_delayed => 1, $wheel_id)
+               unless ($heap->{server}->{$wheel_id}->{disconnecting}++);
+         },
+         close_delayed => sub {
+            my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
+            delete $heap->{server}->{$wheel_id}->{wheel};
          }
-      } elsif($heap->{mode} eq 'sslhandshake') {
-         return unless Server_SSLify_NonBlock_SSLDone($heap->{socket});
-         if (!(Server_SSLify_NonBlock_ClientCertificateExists($heap->{socket}))) {
-            $heap->{wheel_client}->put("NoClientCertExists") if $canwrite;
-            $kernel->yield("disconnect");
-            return;
-         } elsif(!(Server_SSLify_NonBlock_ClientCertIsValid($heap->{socket}))) {
-            $heap->{wheel_client}->put("ClientCertInvalid") if $canwrite;
-            $kernel->yield("disconnect");
-            return;
-         } elsif(!(Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($heap->{socket}, 'ca.crl'))) {
-            $heap->{wheel_client}->put("CRL") if $canwrite;
-            $kernel->yield("disconnect");
-            return;
-         }
-         $heap->{mode} = 'crytped';
       }
-      if ($heap->{mode} eq "cryped") {
-         $heap->{wheel_client}->put("Yeah! You're authenticated!") if $canwrite;
-         $kernel->yield("disconnect");
-      }
-   },
-   disconnect => sub { $_[KERNEL]->delay(close_delayed => 1) unless ($_[HEAP]->{disconnecting}++); },
-   close_delayed => sub {
-      my ($kernel, $heap) = @_[KERNEL, HEAP];
-      delete $heap->{wheel_client};
-   },
-   ...
+   );
+    
+   $poe_kernel->run();
 
 =head1 FUNCTIONS
 
@@ -452,6 +457,21 @@ Note: If your CRL File is missing, can not be opened or has no blocked
             file net-ssleay-patch in the base path of the tar.gz
             of the packet.
 
+=head2 Server_SSLify_NonBlock_GetClientCertificateIDs($socket)
+
+Fetches the IDs as array of the clients certifcate and its
+signees.
+
+Retruns empty ist if you did not patch Net::SSLeay.
+
+=head2 hexdump($string)
+
+Returns string data in hex format.
+
+For example:
+
+  perl -e 'use POE::Component::SSLify::NonBlock; print POE::Component::SSLify::NonBlock::hexdump("test")."\n";'
+  74:65:73:74
 
 =head2 Futher functions...
 
