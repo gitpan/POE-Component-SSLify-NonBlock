@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.32';
+$VERSION = '0.33';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
@@ -222,6 +222,8 @@ is no client certificat or the certificate is not trusted.
 
 =head3 Advanced way: Client certificat reject in POE Handler
 
+Here an solution with SSL direct after ACCEPT.
+
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_SSLDone );
    
@@ -261,19 +263,16 @@ is no client certificat or the certificate is not trusted.
                        (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite");
       return unless Server_SSLify_NonBlock_SSLDone($heap->{socket});
       if (!(Server_SSLify_NonBlock_ClientCertificateExists($heap->{socket}))) {
-         exists $heap->{wheel_client} &&
-           (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite") &&
-                $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nNoClientCertExists");
+         $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nNoClientCertExists") if $canwrite;
          $kernel->yield("disconnect");
          return;
       } elsif(!(Server_SSLify_NonBlock_ClientCertIsValid($heap->{socket}))) {
-         exists $heap->{wheel_client} &&
-           (ref($heap->{wheel_client}) eq "POE::Wheel::ReadWrite") &&
-                $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nClientCertInvalid");
+         $heap->{wheel_client}->put("Content-type: text/html\r\n\r\nClientCertInvalid") if $canwrite;
          $kernel->yield("disconnect");
          return;
       }
-      ...
+      $heap->{wheel_client}->put("Yeah! You're authenticated!") if $canwrite;
+      $kernel->yield("disconnect");
    },
    disconnect => sub { $_[KERNEL]->delay(close_delayed => 1) unless ($_[HEAP]->{disconnecting}++); },
    close_delayed => sub {
@@ -288,8 +287,8 @@ WARNING: For this to work you have to patch into Net::SSLeay the lines in the fi
 net-ssleay-patch in the base path of the tar.gz of the packet, and then recompile and
 reinstall the Net::SSLeay package.
 
-Here an solution with SSL/TLS on the fly and client authentication, initiated via "STARTTLS".
-For example if you want to do IMAPS, POPS or FTPS.
+Here an solution with SSL/TLS on the fly, initiated via "STARTTLS". For example if
+you want to do upgrade a plaintext protokoll to SSL/TLS (e.g. IMAPS, POPS or FTPS).
 
    use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
    use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_SSLDone );
