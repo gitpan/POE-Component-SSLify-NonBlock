@@ -6,7 +6,7 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.35';
+$VERSION = '0.36';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
