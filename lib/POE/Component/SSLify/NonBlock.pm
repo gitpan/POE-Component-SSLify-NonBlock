@@ -6,12 +6,12 @@ use POE::Component::SSLify::NonBlock::ServerHandle;
 use Exporter;
 
 use vars qw( $VERSION @ISA );
-$VERSION = '0.36';
+$VERSION = '0.40';
 
 @ISA = qw(Exporter);
 use vars qw( @EXPORT_OK );
 @EXPORT_OK = qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_SSLDone
-                  Server_SSLify_NonBlock_GetClientCertificateIDs  Server_SSLify_NonBlock_ClientCertificateExists  Server_SSLify_NonBlock_ClientCertIsValid );
+                 Server_SSLify_NonBlock_GetClientCertificateIDs  Server_SSLify_NonBlock_ClientCertificateExists  Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_STARTTLS);
 
 use Symbol qw( gensym );
 
@@ -117,6 +117,12 @@ sub Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL {
       return 1 unless $badcrls;
    }
    return 0;
+}
+
+sub Server_SSLify_NonBlock_STARTTLS {
+   my $socket = shift;
+   my $self = tied( *$socket )->_get_self();
+   $self->dobeginSSL();
 }
 
 sub hexdump { join ':', map { sprintf "%02X", $_ } unpack "C*", $_[0]; }
@@ -247,6 +253,7 @@ feature with the "clientcertrequest" parameter. The Server_SSLify_NonBlock funct
          close_delayed => sub {
             my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
             delete $heap->{server}->{$wheel_id}->{wheel};
+            delete $heap->{server}->{$wheel_id}->{socket};
          }
       }
    );
@@ -325,6 +332,7 @@ is no client certificat or the certificate is not trusted.
          close_delayed => sub {
             my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
             delete $heap->{server}->{$wheel_id}->{wheel};
+            delete $heap->{server}->{$wheel_id}->{socket};
          }
       }
    );
@@ -406,6 +414,84 @@ WARNING: To use this you have to patch the lines from net-ssleay-patch fike into
          close_delayed => sub {
             my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
             delete $heap->{server}->{$wheel_id}->{wheel};
+            delete $heap->{server}->{$wheel_id}->{socket};
+         }
+      }
+   );
+    
+   $poe_kernel->run();
+
+=head2 STARRTTLS
+
+Starting version 0.40, you can do SSL after plain text. This is often called "STARTTLS",
+"AUTH TLS" or "AUTH SSL". Here an FTP example:
+
+   use POE::Component::SSLify qw( SSLify_Options SSLify_GetCTX );
+   use POE::Component::SSLify::NonBlock qw( Server_SSLify_NonBlock SSLify_Options_NonBlock_ClientCert Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL Server_SSLify_NonBlock_ClientCertificateExists Server_SSLify_NonBlock_ClientCertIsValid Server_SSLify_NonBlock_SSLDone Server_SSLify_NonBlock_STARTTLS);
+   use POE qw( Wheel::SocketFactory Driver::SysRW Filter::Stream Wheel::ReadWrite );
+
+   eval { SSLify_Options( 'server.key', 'server.crt' ) };
+   die "SSLify_Options: ".$@ if ( $@ );
+
+   eval { SSLify_Options_NonBlock_ClientCert(SSLify_GetCTX(), 'ca.crt' ) };
+   die "SSLify_Options_NonBlock_ClientCert: ".$@ if ( $@ );
+
+   POE::Session->create(
+      inline_states => {
+         _start => sub {
+            my ( $heap, $kernel ) = @_[ HEAP, KERNEL ];
+            $heap->{server_wheel} = POE::Wheel::SocketFactory->new(
+               BindAddress  => "0.0.0.0",
+               BindPort     => 443,
+               Reuse        => 'yes',
+               SuccessEvent => 'client_accept',
+               FailureEvent => 'accept_failure',
+            );
+         },
+         client_accept => sub {
+            my ( $heap, $kernel, $socket ) = @_[ HEAP, KERNEL, ARG0 ];
+            eval { $socket = Server_SSLify_NonBlock( SSLify_GetCTX(), $socket, {
+               debug => 1,
+               starttls => 1
+            } ) };
+            if ( $@ ) {
+               print "SSL Failed: ".$@."\n";
+               delete $heap->{server}->{$wheel_id}->{wheel};
+            }
+            my $io_wheel = POE::Wheel::ReadWrite->new(
+               Handle     => $socket,
+               Driver     => POE::Driver::SysRW->new,
+               Filter     => POE::Filter::Stream->new,
+               InputEvent => 'client_input'
+            );
+            $heap->{server}->{$io_wheel->ID()}->{wheel} = $io_wheel;
+            $heap->{server}->{$io_wheel->ID()}->{socket} = $socket;
+            $io_wheel->put("220 ProFTPD\r\n");
+         },
+         client_input => sub {
+            my ( $heap, $kernel, $input, $wheel_id ) = @_[ HEAP, KERNEL, ARG0, ARG1 ];
+            my $canwrite = exists $heap->{server}->{$wheel_id}->{wheel} &&
+                             (ref($heap->{server}->{$wheel_id}->{wheel}) eq "POE::Wheel::ReadWrite");
+            my $socket = $heap->{server}->{$wheel_id}->{socket};
+            if (($input =~ /TLS/i) ||
+                ($input =~ /SSL/i)) {
+               $heap->{server}->{$wheel_id}->{wheel}->put("220 starttls\r\n");
+               $heap->{server}->{$wheel_id}->{wheel}->flush();
+               Server_SSLify_NonBlock_STARTTLS($socket);
+            }
+            return unless Server_SSLify_NonBlock_SSLDone($socket);
+            $heap->{server}->{$wheel_id}->{wheel}->put("220 Yeah! You're authenticated!\n") if ($canwrite && (!$heap->{server}->{$wheel_id}->{disconnecting}));
+            $kernel->yield("disconnect" => $wheel_id);
+         },
+         disconnect => sub {
+            my ($heap, $kernel, $wheel_id) = @_[HEAP, KERNEL, ARG0];
+            $kernel->delay(close_delayed => 1, $wheel_id)
+               unless ($heap->{server}->{$wheel_id}->{disconnecting}++);
+         },
+         close_delayed => sub {
+            my ($kernel, $heap, $wheel_id) = @_[KERNEL, HEAP, ARG0];
+            delete $heap->{server}->{$wheel_id}->{wheel};
+            delete $heap->{server}->{$wheel_id}->{socket};
          }
       }
    );
@@ -460,6 +546,10 @@ Options are:
                file net-ssleay-patch in the base path of the
                tar.gz of the packet.
 
+   starttls
+      Don't actually do SSL but later. It is initiated if you
+      call Server_SSLify_NonBlock_STARTTLS.
+
 Note:
 
    SSLify_Options from POE::Component::SSLify must be set first!
@@ -481,6 +571,15 @@ Verify if the client commited a valid client certificate.
 Verify if the client certificate is trusted by a loaded CA (see SSLify_Options_NonBlock_ClientCert).
 
   Server_SSLify_NonBlock_ClientCertIsValid($socket);
+
+=head2 Server_SSLify_NonBlock_STARTTLS($socket)
+
+Initiates SSL after plain text conversation. You have to use the
+starttls option in Server_SSLify_NonBlock.
+
+  Server_SSLify_NonBlock_STARTTLS($socket)
+
+See STARTTLS example above.
 
 =head2 Server_SSLify_NonBlock_ClientCertVerifyAgainstCRL($socket, $crlfile)
 

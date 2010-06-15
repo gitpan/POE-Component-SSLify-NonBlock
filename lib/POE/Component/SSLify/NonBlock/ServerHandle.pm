@@ -4,7 +4,7 @@ use strict; use warnings;
 
 # Initialize our version
 use vars qw( $VERSION );
-$VERSION = (qw$LastChangedRevision: 9 $)[1];
+$VERSION = (qw$LastChangedRevision: 10 $)[1];
 
 # Import the SSL death routines
 use Net::SSLeay qw( die_now die_if_ssl_error );
@@ -14,37 +14,43 @@ our $getserial = 0;
 
 # Ties the socket
 sub TIEHANDLE {
-	my ( $class, $socket, $ctx, $params ) = @_;
+	my ( $class, $socket, $ctx, $params ) = @_;	
 
-	my $ssl = Net::SSLeay::new( $ctx ) or die_now( "Failed to create SSL $!" );
+	my $self = bless {
+		'ctx'		     => $ctx,
+		'socket'	     => $socket,
+		'fileno'	     => fileno( $socket ),
+      'acceptstate' => 0,
+      'crypting'    => 0,
+      'debug'       => $params->{debug},
+      'params'      => $params
+	}, $class;
 
-	my $fileno = fileno( $socket );
-
-	Net::SSLeay::set_fd( $ssl, $fileno );
-
-   if ($params->{clientcertrequest}) {
-      my $orfilter = &Net::SSLeay::VERIFY_PEER
-                     | &Net::SSLeay::VERIFY_CLIENT_ONCE;
-      $orfilter |=  &Net::SSLeay::VERIFY_FAIL_IF_NO_PEER_CERT unless $params->{noblockbadclientcert};
-      Net::SSLeay::set_verify ($ssl, $orfilter, \&VERIFY);
+   unless ($params->{starttls}) {
+      $self->dobeginSSL();
+      return undef unless $self->HANDLESSL();
    }
-   $getserial = $params->{getserial};
+	return $self;
+}
+
+sub dobeginSSL {
+   my $self = shift;
+   return if ($self->{crypting}++);
+
+   $self->{ssl} = Net::SSLeay::new( $self->{ctx} ) or die_now( "Failed to create SSL $!" );
+	Net::SSLeay::set_fd( $self->{ssl}, $self->{fileno} );
+
+   if ($self->{params}->{clientcertrequest}) {
+      my $orfilter = &Net::SSLeay::VERIFY_PEER
+                   | &Net::SSLeay::VERIFY_CLIENT_ONCE;
+      $orfilter |=  &Net::SSLeay::VERIFY_FAIL_IF_NO_PEER_CERT unless $self->{params}->{noblockbadclientcert};
+      Net::SSLeay::set_verify ($self->{ssl}, $orfilter, \&VERIFY);
+   }
 
    # BAD!
 	#my $err = Net::SSLeay::accept( $ssl ) and die_if_ssl_error( 'ssl accept' );
 
-	my $self = bless {
-		'ssl'		     => $ssl,
-		'ctx'		     => $ctx,
-		'socket'	     => $socket,
-		'fileno'	     => $fileno,
-      'acceptstate' => 0,
-      'debug'       => $params->{debug}
-	}, $class;
    $globalinfos = [0, 0, []];
-
-   return undef unless $self->HANDLESSL();
-	return $self;
 }
 
 # Verifys client certificates
@@ -88,54 +94,60 @@ sub HANDLESSL {
 sub READ {
 	# Get ourself!
 	my $self = shift;
+   my( $buf, $len, $offset ) = \( @_ );
 
-	# Get the pointers to buffer, length, and the offset
-	my( $buf, $len, $offset ) = \( @_ );
+   if ($self->{crypting}) {
+      # Get the pointers to buffer, length, and the offset
 
-   return -1 unless exists($self->{'acceptstate'});
+      return -1 unless exists($self->{'acceptstate'});
 
-   if ($self->{'acceptstate'} < 3) {
-      $self->{'acceptstate'} = $self->HANDLESSL();
       if ($self->{'acceptstate'} < 3) {
-         return -1 unless $self->{'acceptstate'};
-         # Currently we can't read cause we're in handshake!
-         print "Currently we can't read cause we're in handshake!\n"
-            if ($self->{debug});
-         $$buf = "";
-         return -2;
+         $self->{'acceptstate'} = $self->HANDLESSL();
+         if ($self->{'acceptstate'} < 3) {
+            return -1 unless $self->{'acceptstate'};
+            # Currently we can't read cause we're in handshake!
+            print "Currently we can't read cause we're in handshake!\n"
+               if ($self->{debug});
+            $$buf = "";
+            return -2;
+         }
       }
+
+      # If we have no offset, replace the buffer with some input
+      if ( ! defined $$offset ) {
+         $$buf = Net::SSLeay::read( $self->{'ssl'}, $$len );
+
+         # Are we done?
+         if ( defined $$buf ) {
+            return length( $$buf );
+         } else {
+            # Nah, clear the buffer too...
+            $$buf = "";
+            return;
+         }
+      }
+
+      # Now, actually read the data
+      defined( my $read = Net::SSLeay::read( $self->{'ssl'}, $$len ) ) or return undef;
+
+      # Figure out the buffer and offset
+      my $buf_len = length( $$buf );
+
+      # If our offset is bigger, pad the buffer
+      if ( $$offset > $buf_len ) {
+         $$buf .= chr( 0 ) x ( $$offset - $buf_len );
+      }
+
+      # Insert what we just read into the buffer
+      substr( $$buf, $$offset ) = $read;
+
+      # All done!
+      return length( $read );
+   } else {
+      return sysread( $self->{'socket'}, $$buf, 
+         (defined($len)    ? $$len    : undef),
+         (defined($offset) ? $$offset : undef) );
    }
-
-	# If we have no offset, replace the buffer with some input
-	if ( ! defined $$offset ) {
-		$$buf = Net::SSLeay::read( $self->{'ssl'}, $$len );
-
-		# Are we done?
-		if ( defined $$buf ) {
-			return length( $$buf );
-		} else {
-			# Nah, clear the buffer too...
-			$$buf = "";
-			return;
-		}
-	}
-
-	# Now, actually read the data
-	defined( my $read = Net::SSLeay::read( $self->{'ssl'}, $$len ) ) or return undef;
-
-	# Figure out the buffer and offset
-	my $buf_len = length( $$buf );
-
-	# If our offset is bigger, pad the buffer
-	if ( $$offset > $buf_len ) {
-		$$buf .= chr( 0 ) x ( $$offset - $buf_len );
-	}
-
-	# Insert what we just read into the buffer
-	substr( $$buf, $$offset ) = $read;
-
-	# All done!
-	return length( $read );
 }
 
 # Write some stuff to the socket
@@ -143,36 +155,40 @@ sub WRITE {
 	# Get ourself + buffer + length + offset to write
 	my( $self, $buf, $len, $offset ) = @_;
 
-	# If we have nothing to offset, then start from the beginning
-	if ( ! defined $offset ) {
-		$offset = 0;
-	}
-
-   return -1 unless exists($self->{'acceptstate'});
-
-   if ($self->{'acceptstate'} < 3) {
-      $self->{'acceptstate'} = $self->HANDLESSL();
-      if ($self->{'acceptstate'} < 3) {
-         return -1 unless $self->{'acceptstate'};
-         # Currently we can't read cause we're in handshake!
-         print "Currently we can't read cause we're in handshake!\n"
-            if ($self->{debug});
-         return -2;
+   if ($self->{crypting}) {
+      # If we have nothing to offset, then start from the beginning
+      if ( ! defined $offset ) {
+         $offset = 0;
       }
+
+      return -1 unless exists($self->{'acceptstate'});
+
+      if ($self->{'acceptstate'} < 3) {
+         $self->{'acceptstate'} = $self->HANDLESSL();
+         if ($self->{'acceptstate'} < 3) {
+            return -1 unless $self->{'acceptstate'};
+            # Currently we can't read cause we're in handshake!
+            print "Currently we can't read cause we're in handshake!\n"
+               if ($self->{debug});
+            return -2;
+         }
+      }
+
+      # We count the number of characters written to the socket
+      my $wrote_len = Net::SSLeay::write( $self->{'ssl'}, substr( $buf, $offset, $len ) );
+
+      # Did we get an error or number of bytes written?
+      # Net::SSLeay::write() returns the number of bytes written, or -1 on error.
+      #if ( $wrote_len < 0 ) {
+         # The normal syswrite() POE uses expects 0 here.
+      #   return 0;
+      #} else {
+         # All done!
+         return $wrote_len;
+      #}
+   } else {
+      return syswrite( $self->{'socket'}, $buf, $len, $offset );
    }
-
-	# We count the number of characters written to the socket
-	my $wrote_len = Net::SSLeay::write( $self->{'ssl'}, substr( $buf, $offset, $len ) );
-
-	# Did we get an error or number of bytes written?
-	# Net::SSLeay::write() returns the number of bytes written, or -1 on error.
-	if ( $wrote_len < 0 ) {
-		# The normal syswrite() POE uses expects 0 here.
-		return 0;
-	} else {
-		# All done!
-		return $wrote_len;
-	}
 }
 
 # Sets binmode on the socket
@@ -258,11 +274,13 @@ POE::Component::SSLify::NonBlock::ServerHandle - server object for POE::Componen
 
 Processes input for OpenSSL.
 
-
 =head2 VERIFY
 
 Verifys client certificates.
 
+=head2 dobeginSSL
+
+Postprocesses a new SSL handling.
 
 =head1 SEE ALSO
 
