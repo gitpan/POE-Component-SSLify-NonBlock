@@ -7,3 +7,7 @@ Revision history for POE-Component-SSLify-NonBlock
 0.36    01.06.2010, 14:30
         Just documentation and build fixes.
 
+0.40	15.06.2010, 20:03
+	Integrated support of STARTTLS
+	Documentation fixed about disconnecting connections
+

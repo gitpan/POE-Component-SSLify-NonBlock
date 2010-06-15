@@ -290,15 +290,11 @@ L<POE::Component::SSLify::NonBlock>
 
 pRiVi E<lt>pRiVi@cpan.orgE<gt>
 
-=head1 PROPS
+=head1 PROPS, COPYRIGHT AND LICENSE
 
 This code is based on Apocalypse module POE::Component::SSLify, improved by client certification code and non-blocking sockets.
 
 Copyright 2010 by Markus Mueller/Apocalypse/Rocco Caputo/Dariusz Jackowski.
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright 2010 by Markus Mueller
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
